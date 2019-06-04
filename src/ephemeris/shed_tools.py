@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 A tool to automate installation of tool repositories from a Galaxy Tool Shed
 into an instance of Galaxy.
@@ -46,6 +47,8 @@ import yaml
 from bioblend.galaxy.client import ConnectionError
 from bioblend.galaxy.toolshed import ToolShedClient
 from galaxy.tools.verify.interactor import GalaxyInteractorApi, verify_tool
+from six import text_type
+from yaspin import kbi_safe_yaspin as yaspin
 
 from . import get_galaxy_connection, load_yaml_file
 from .ephemeris_log import disable_external_library_logging, setup_global_logger
@@ -154,11 +157,12 @@ class InstallRepositoryManager(object):
 
         # Install repos
         for repository in filtered_repos.not_installed_repos:
+            spinner = None
             counter += 1
             if log:
-                log_repository_install_start(repository, counter=counter, installation_start=installation_start, log=log,
+                spinner = log_repository_install_start(repository, counter=counter, installation_start=installation_start, log=log,
                                              total_num_repositories=total_num_repositories)
-            result = self.install_repository_revision(repository, log)
+            result = self.install_repository_revision(repository, log, spinner)
             if result == "error":
                 errored_repositories.append(repository)
             elif result == "skipped":
@@ -347,7 +351,7 @@ class InstallRepositoryManager(object):
 
             executor.submit(run_test, test_index, test_id)
 
-    def install_repository_revision(self, repository, log):
+    def install_repository_revision(self, repository, log, spinner):
         default_err_msg = ('All repositories that you are attempting to install '
                            'have been previously installed.')
         start = dt.datetime.now()
@@ -362,12 +366,14 @@ class InstallRepositoryManager(object):
                 #  installed, possibly because the selected repository has
                 #  already been installed.'}
                 if log:
-                    log.debug("\tRepository {0} is already installed.".format(repository['name']))
+                    #log.debug("\tRepository {0} is already installed.".format(repository['name']))
+                    spinner.write("\tRepository {0} is already installed.".format(repository['name']))
             if log:
                 log_repository_install_success(
                     repository=repository,
                     start=start,
-                    log=log)
+                    log=log,
+                    spinner=spinner)
             return "installed"
         except (ConnectionError, requests.exceptions.ConnectionError) as e:
             if default_err_msg in str(e):
@@ -378,28 +384,32 @@ class InstallRepositoryManager(object):
                 return "skipped"
             elif "504" in str(e) or 'Connection aborted' in str(e):
                 if log:
-                    log.debug("Timeout during install of %s, extending wait to 1h", repository['name'])
+                    spinner.write("> Timeout during install of %s, extending wait to 1h", repository['name'])
+                    #log.debug("Timeout during install of %s, extending wait to 1h", repository['name'])
                 success = self.wait_for_install(repository=repository, log=log, timeout=3600)
                 if success:
                     if log:
                         log_repository_install_success(
                             repository=repository,
                             start=start,
-                            log=log)
+                            log=log,
+                            spinner=spinner)
                     return "installed"
                 else:
                     if log:
                         log_repository_install_error(
                             repository=repository,
                             start=start, msg=e.body,
-                            log=log)
+                            log=log,
+                            spinner=spinner)
                     return "error"
             else:
                 if log:
                     log_repository_install_error(
                         repository=repository,
                         start=start, msg=e.body,
-                        log=log)
+                        log=log,
+                        spinner=spinner)
                 return "error"
 
     def wait_for_install(self, repository, log=None, timeout=3600):
@@ -429,38 +439,47 @@ class InstallRepositoryManager(object):
         return False
 
 
-def log_repository_install_error(repository, start, msg, log):
+def log_repository_install_error(repository, start, msg, log, spinner):
     """
     Log failed repository installations. Return a dictionary with information
     """
     end = dt.datetime.now()
-    log.error(
-        "\t* Error installing a repository (after %s seconds)! Name: %s," "owner: %s, ""revision: %s, error: %s",
-        str(end - start),
-        repository.get('name', ""),
-        repository.get('owner', ""),
-        repository.get('changeset_revision', ""),
-        msg)
+    #log.error(
+    #    "\t* Error installing a repository (after %s seconds)! Name: %s," "owner: %s, ""revision: %s, error: %s",
+    #    str(end - start),
+    #    repository.get('name', ""),
+    #    repository.get('owner', ""),
+    #    repository.get('changeset_revision', ""),
+    #    msg)
+    spinner.write("error: %s" % msg)
+    spinner.text += " (Elapsed: {})".format(str(end - start))
+    spinner.color = "red"
+    spinner.fail("✘")
 
 
-def log_repository_install_success(repository, start, log):
+def log_repository_install_success(repository, start, log, spinner):
     """
     Log successful repository installation.
     Repositories that finish in error still count as successful installs currently.
     """
     end = dt.datetime.now()
-    log.debug(
-        "\trepository %s installed successfully (in %s) at revision %s" % (
-            repository['name'],
-            str(end - start),
-            repository['changeset_revision']
-        )
-    )
+    #log.debug(
+    #    "\trepository %s installed successfully (in %s) at revision %s" % (
+    #spinner.ok(
+    #    "✔ repository %s installed successfully (in %s) at revision %s".decode('utf-8') % (
+    #        repository['name'],
+    #        str(end - start),
+    #        repository['changeset_revision']
+    #    )
+    #)
+    spinner.text += " (Elapsed: {})".format(str(end - start))
+    spinner.color = "green"
+    spinner.ok("✔")
 
 
 def log_repository_install_skip(repository, counter, total_num_repositories, log):
     log.debug(
-        "({0}/{1}) repository {2} already installed at revision {3}. Skipping."
+        "- ({0}/{1}) repository {2} already installed at revision {3}. Skipping."
         .format(
             counter,
             total_num_repositories,
@@ -471,16 +490,20 @@ def log_repository_install_skip(repository, counter, total_num_repositories, log
 
 
 def log_repository_install_start(repository, counter, total_num_repositories, installation_start, log):
-    log.debug(
-        '(%s/%s) Installing repository %s from %s to section "%s" at revision %s (TRT: %s)' % (
+    #log.debug(
+    spinner = yaspin(
+        text='(%s/%s) Installing repository %s from %s to section "%s" at revision %s (TRT@start: %s)' % (
             counter, total_num_repositories,
             repository['name'],
             repository['owner'],
             repository['tool_panel_section_id'] or repository['tool_panel_section_label'],
             repository['changeset_revision'],
             dt.datetime.now() - installation_start
-        )
+        ),
+        color="cyan"
     )
+    spinner.start()
+    return spinner
 
 
 def args_to_repos(args):
