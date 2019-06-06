@@ -1,5 +1,105 @@
+# -*- coding: utf-8 -*-
 import logging
+import signal
 import tempfile
+from functools import partial
+
+from yaspin.core import Yaspin
+from yaspin.signal_handlers import default_handler
+
+
+class Logger(object):
+    def _init(self, *args, **kwargs):
+        self._spinning = False
+        self.debug = partial(self._mlog, logging.DEBUG)
+        self.info = partial(self._mlog, logging.INFO)
+        self.warning = partial(self._mlog, logging.WARNING)
+        self.error = partial(self._mlog, logging.ERROR)
+
+    def _getmsg(self, msg, *args):
+        if self._spinning:
+            msg += self._msg_prefix + msg
+        return msg % args
+
+    def start(self, *args, **kwargs):
+        self._spinning = True
+
+    def ok(self, *args, **kwargs):
+        self._spinning = False
+
+    def skip(self, *args, **kwargs):
+        self._spinning = False
+
+    def fail(self, *args, **kwargs):
+        self._spinning = False
+
+
+class LoggingLogger(logging.getLoggerClass(), Logger):
+
+    _msg_prefix = '\t'
+
+    def __init__(self, *args, **kwargs):
+        super(LoggingLogger, self).__init__(*args, **kwargs)
+        self._init(*args, **kwargs)
+
+    def _mlog(self, level, msg, *args, **kwargs):
+        self.log(level, self._getmsg(msg), *args)
+
+    def start(self, msg, *args, **kwargs):
+        level = kwargs.get('level', logging.DEBUG)
+        self.log(level, msg % args)
+        super(LoggingLogger, self).start(*args, **kwargs)
+
+    def ok(self, msg, *args, **kwargs):
+        level = kwargs.get('level', logging.DEBUG)
+        self.log(level, msg % args)
+        super(LoggingLogger, self).ok(*args, **kwargs)
+
+    skip = ok
+
+    def fail(self, msg, *args, **kwargs):
+        self.log(logging.ERROR, msg % args)
+        super(LoggingLogger, self).fail(*args, **kwargs)
+
+
+class SpinningLogger(Yaspin, Logger):
+
+    _msg_prefix = '> '
+
+    def __init__(self, *args, **kwargs):
+        kwargs["sigmap"] = {signal.SIGINT: default_handler}
+        super(SpinningLogger, self).__init__(*args, **kwargs)
+        self._init(*args, **kwargs)
+
+    def __append(self, kwargs):
+        if 'append' in kwargs:
+            self.text += ' ' + kwargs['append']
+
+    def _mlog(self, level, msg, *args, **kwargs):
+        self.write(self._getmsg(msg, *args))
+
+    def start(self, msg, *args, **kwargs):
+        self.text = msg
+        self.color = kwargs.get('color', 'cyan')
+        super(SpinningLogger, self).start(*args, **kwargs)
+
+    def ok(self, *args, **kwargs):
+        self.__append(kwargs)
+        self.color = 'green'
+        super(SpinningLogger, self).ok('✔')
+
+    def skip(self, *args, **kwargs):
+        self.__append(kwargs)
+        self.color = 'yellow'
+        super(SpinningLogger, self).ok('-')
+
+    def fail(self, *args, **kwargs):
+        self.__append(kwargs)
+        self.color = 'red'
+        super(SpinningLogger, self).fail('✘')
+
+
+logging.setLoggerClass(LoggingLogger)
 
 
 class ProgressConsoleHandler(logging.StreamHandler):
@@ -41,6 +141,8 @@ def disable_external_library_logging():
 
 
 def setup_global_logger(name, log_file=None):
+    return SpinningLogger()
+    """
     formatter = logging.Formatter('%(asctime)s %(levelname)-5s - %(message)s')
     progress = ProgressConsoleHandler()
     console = logging.StreamHandler()
@@ -60,3 +162,4 @@ def setup_global_logger(name, log_file=None):
     logger.addHandler(file_handler)
     logger.info("Storing log file in: {0}".format(log_file))
     return logger
+    """
