@@ -67,36 +67,52 @@ class SpinningLogger(Yaspin, Logger):
     _msg_prefix = '> '
 
     def __init__(self, *args, **kwargs):
+        name = kwargs.pop('name')
+        log_file = kwargs.pop('log_file')
         kwargs["sigmap"] = {signal.SIGINT: default_handler}
         super(SpinningLogger, self).__init__(*args, **kwargs)
         self._init(*args, **kwargs)
+        self.__init_file_logger(name, log_file)
+
+    def __init_file_logger(self, name, log_file):
+        self.file_logger = logging.getLogger(name)
+        self.file_logger.setLevel(logging.DEBUG)
+        self.file_logger.handlers = []
+        self.file_logger.addHandler(logging.FileHandler(log_file))
+        self.info("Storing log file in: {0}".format(log_file))
 
     def __append(self, kwargs):
         if 'append' in kwargs:
             self.text += ' ' + kwargs['append']
 
     def _mlog(self, level, msg, *args, **kwargs):
-        self.write(self._getmsg(msg, *args))
+        log_msg = self._getmsg(msg, *args)
+        self.write(log_msg)
+        self.file_logger.log(level, log_msg)
 
     def start(self, msg, *args, **kwargs):
         self.text = msg
         self.color = kwargs.get('color', 'cyan')
         super(SpinningLogger, self).start(*args, **kwargs)
+        self.file_logger.info(self.text)
 
     def ok(self, *args, **kwargs):
         self.__append(kwargs)
         self.color = 'green'
         super(SpinningLogger, self).ok('✔')
+        self.file_logger.info('{} {}'.format('✔', self.text))
 
     def skip(self, *args, **kwargs):
         self.__append(kwargs)
         self.color = 'yellow'
         super(SpinningLogger, self).ok('-')
+        self.file_logger.info('{} {}'.format('-', self.text))
 
     def fail(self, *args, **kwargs):
         self.__append(kwargs)
         self.color = 'red'
         super(SpinningLogger, self).fail('✘')
+        self.file_logger.info('{} {}'.format('✘', self.text))
 
 
 logging.setLoggerClass(LoggingLogger)
@@ -140,9 +156,17 @@ def disable_external_library_logging():
         pass
 
 
-def setup_global_logger(name, log_file=None):
-    return SpinningLogger()
-    """
+def make_log_file(log_file):
+    if not log_file:
+        # delete = false is chosen here because it is always nice to have a log file
+        # ready if you need to debug. Not having the "if only I had set a log file"
+        # moment after the fact.
+        temp = tempfile.NamedTemporaryFile(prefix="ephemeris_", delete=False)
+        log_file = temp.name
+    return log_file
+
+
+def setup_global_logging_logger(name, log_file=None):
     formatter = logging.Formatter('%(asctime)s %(levelname)-5s - %(message)s')
     progress = ProgressConsoleHandler()
     console = logging.StreamHandler()
@@ -152,14 +176,15 @@ def setup_global_logger(name, log_file=None):
     logger.setLevel(logging.DEBUG)
     logger.addHandler(progress)
 
-    if not log_file:
-        # delete = false is chosen here because it is always nice to have a log file
-        # ready if you need to debug. Not having the "if only I had set a log file"
-        # moment after the fact.
-        temp = tempfile.NamedTemporaryFile(prefix="ephemeris_", delete=False)
-        log_file = temp.name
     file_handler = logging.FileHandler(log_file)
     logger.addHandler(file_handler)
     logger.info("Storing log file in: {0}".format(log_file))
     return logger
-    """
+
+
+def setup_global_logger(name, log_file=None, logger='logging'):
+    log_file = make_log_file(log_file)
+    if logger == 'spinning':
+        return SpinningLogger(name=name, log_file=log_file)
+    else:
+        return setup_global_logging_logger(name, log_file=log_file)

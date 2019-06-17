@@ -516,7 +516,7 @@ def args_to_repos(args):
 def main():
     disable_external_library_logging()
     args = parser().parse_args()
-    log = setup_global_logger(name=__name__, log_file=args.log_file)
+    log = setup_global_logger(name=__name__, log_file=args.log_file, logger='spinning')
     gi = get_galaxy_connection(args, file=args.tool_list_file, log=log, login_required=True)
     install_repository_manager = InstallRepositoryManager(gi)
 
