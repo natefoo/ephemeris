@@ -528,16 +528,9 @@ def main():
         tool_list = dict()
 
     # Get some of the other installation arguments
-    kwargs = dict(
-        default_install_tool_dependencies=tool_list.get("install_tool_dependencies") or getattr(args,
-                                                                                                "install_tool_dependencies",
-                                                                                                False),
-        default_install_repository_dependencies=tool_list.get("install_repository_dependencies") or getattr(args,
-                                                                                                            "install_repository_dependencies",
-                                                                                                            False),
-        default_install_resolver_dependencies=tool_list.get("install_resolver_dependencies") or getattr(args,
-                                                                                                        "install_resolver_dependencies",
-                                                                                                        False))
+    kwargs = {}
+    for arg in ("install_tool_dependencies", "install_repository_dependencies", "install_resolver_dependencies"):
+        kwargs["default_" + arg] = tool_list.get(arg, getattr(args, arg, False))
 
     # Start installing/updating and store the results in install_results.
     # Or do testing if the action is `test`
